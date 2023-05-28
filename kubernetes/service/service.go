@@ -20,11 +20,11 @@ package service
 import (
 	"cli/util"
 	"context"
-	"fmt"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -75,7 +75,7 @@ func (sg getter) GetByNamespacedName(ctx context.Context, namespacedName types.N
 	svc := &corev1.Service{}
 	if err := sg.Get(ctx, namespacedName, svc); err != nil {
 		if apierrors.IsNotFound(err) {
-			fmt.Println("nebula-studio service not found, ready to create")
+			klog.Infof("nebula-studio service not found, Namespace: %s, Name: %s", namespacedName.Namespace, namespacedName.Name)
 			return nil, nil
 		}
 		return nil, err
