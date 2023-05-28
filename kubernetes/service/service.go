@@ -100,11 +100,11 @@ func (sg setter) Update(ctx context.Context, svc *corev1.Service) error {
 	return sg.Client.Update(ctx, svc)
 }
 
-func DefaultService() *corev1.Service {
+func DefaultService(nn string) *corev1.Service {
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      DefaultServiceName,
-			Namespace: util.DefaultNamespace,
+			Namespace: nn,
 			Labels: map[string]string{
 				"app": "nebula-studio",
 			},

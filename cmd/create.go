@@ -99,7 +99,7 @@ func (ng *ngCreateOptions) createService(ctx context.Context, nn types.Namespace
 		return err
 	}
 	if svc == nil {
-		svc = service.DefaultService()
+		svc = service.DefaultService(nn.Namespace)
 		klog.Infof("create service, Namespace: %s, Name: %s", svc.Namespace, svc.Name)
 		if err = svcClient.Create(ctx, svc); err != nil {
 			return err
@@ -115,7 +115,7 @@ func (ng *ngCreateOptions) createDeployment(ctx context.Context, nn types.Namesp
 		return err
 	}
 	if dp == nil {
-		dp = deployment.DefaultDeployment()
+		dp = deployment.DefaultDeployment(nn.Namespace)
 		if err = dpClient.Create(ctx, dp); err != nil {
 			return err
 		}
@@ -132,7 +132,7 @@ func (ng *ngCreateOptions) localAccess(cmd *cobra.Command) error {
 		if err != nil {
 			return err
 		}
-		svc, err := newclient.CoreV1().Services(util.DefaultNamespace).Get(context.Background(), service.DefaultServiceName, metav1.GetOptions{})
+		svc, err := newclient.CoreV1().Services(ng.Namespace).Get(context.Background(), service.DefaultServiceName, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}

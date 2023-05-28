@@ -103,11 +103,11 @@ func (ds setter) Update(ctx context.Context, dp *appsv1.Deployment) error {
 	return ds.Client.Update(ctx, dp)
 }
 
-func DefaultDeployment() *appsv1.Deployment {
+func DefaultDeployment(nn string) *appsv1.Deployment {
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      DefaultDeploymentName,
-			Namespace: util.DefaultNamespace,
+			Namespace: nn,
 			Labels: map[string]string{
 				"app": "nebula-studio",
 			},
