@@ -1,6 +1,3 @@
-/*
-Copyright © 2023 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
@@ -10,6 +7,13 @@ import (
 	"cli/util"
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -22,13 +26,7 @@ import (
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
 	"k8s.io/klog/v2"
-	"net/http"
-	"net/url"
-	"os"
-	"os/signal"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"syscall"
-	"time"
 )
 
 type ngCreateOptions struct {
@@ -51,7 +49,7 @@ func NewCreateCommand(c argclient.Args, ioStream util.IOStreams) *cobra.Command 
 				return err
 			}
 			ng.client = newClient
-			if err = ng.getNamespaceArg(ctx, cmd); err != nil {
+			if err = ng.getNamespace(ctx); err != nil {
 				return err
 			}
 			if err = ng.createService(ctx, types.NamespacedName{
@@ -73,25 +71,22 @@ func NewCreateCommand(c argclient.Args, ioStream util.IOStreams) *cobra.Command 
 		},
 	}
 	cmd.Flags().BoolP("local", "l", false, "local access to nebula-studio")
-	cmd.Flags().StringP("namespace", "n", util.DefaultNamespace, "namespace of nebula-studio")
+	cmd.Flags().StringVarP(&ng.Namespace, "namespace", "n", util.DefaultNamespace, "namespace of nebula-studio")
 	cmd.SetOut(ioStream.Out)
 	return cmd
 }
 
-func (ng *ngCreateOptions) getNamespaceArg(ctx context.Context, cmd *cobra.Command) error {
-	nn, _ := cmd.Flags().GetString("namespace")
+func (ng *ngCreateOptions) getNamespace(ctx context.Context) error {
 	namespace := &corev1.Namespace{}
-	typenn := types.NamespacedName{Namespace: nn}
-	if err := ng.client.Get(ctx, typenn, namespace); err != nil {
+	if err := ng.client.Get(ctx, client.ObjectKey{Name: ng.Namespace}, namespace); err != nil {
 		if apierrors.IsNotFound(err) {
-			klog.Infof("%s namespace not found, ready to create", nn)
-			namespace.Name = nn
+			klog.Infof("%s namespace not found, ready to create", ng.Namespace)
+			namespace.Name = ng.Namespace
 			if err = ng.client.Create(ctx, namespace); err != nil {
 				return err
 			}
-			ng.Namespace = nn
 		} else {
-			return err
+			return fmt.Errorf("get namespace %s failed, err: %v", ng.Namespace, err)
 		}
 	}
 	return nil
@@ -128,6 +123,7 @@ func (ng *ngCreateOptions) createDeployment(ctx context.Context, nn types.Namesp
 	return nil
 }
 
+// nolint: nestif
 func (ng *ngCreateOptions) localAccess(cmd *cobra.Command) error {
 	local, _ := cmd.Flags().GetBool("local")
 
@@ -146,26 +142,26 @@ func (ng *ngCreateOptions) localAccess(cmd *cobra.Command) error {
 		}
 
 		pod := &corev1.Pod{}
-		err = waitForPodRunning(newclient, pod, svc.Namespace, selector.String(), 5*time.Second, 1*time.Minute)
-
-		klog.Info(pod.Name)
+		if err = waitForPodRunning(newclient, pod, svc.Namespace, selector.String(), 5*time.Second, 1*time.Minute); err != nil {
+			return err
+		}
 
 		req := newclient.CoreV1().RESTClient().Post().Namespace(pod.Namespace).
 			Resource("pods").Name(pod.Name).SubResource("portforward")
 		klog.Info(req.URL())
 
 		signals := make(chan os.Signal, 1)
-		StopChannel := make(chan struct{}, 1)
-		ReadyChannel := make(chan struct{})
+		stopChannel := make(chan struct{}, 1)
+		readyChannel := make(chan struct{})
 
 		defer signal.Stop(signals)
 
-		signal.Notify(signals, os.Interrupt, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+		signal.Notify(signals, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
 		go func() {
 			<-signals
-			if StopChannel != nil {
-				close(StopChannel)
+			if stopChannel != nil {
+				close(stopChannel)
 			}
 		}()
 
@@ -173,13 +169,13 @@ func (ng *ngCreateOptions) localAccess(cmd *cobra.Command) error {
 		if err != nil {
 			return err
 		}
-		if err := ng.ForwardPorts("POST", req.URL(), config, StopChannel, ReadyChannel); err != nil {
+		if err := ng.ForwardPorts("POST", req.URL(), config, stopChannel, readyChannel); err != nil {
 			klog.Fatalln(err)
 		}
 	}
 	return nil
 }
-func (ng *ngCreateOptions) ForwardPorts(method string, url *url.URL, config *rest.Config, StopChannel, ReadyChannel chan struct{}) error {
+func (ng *ngCreateOptions) ForwardPorts(method string, url *url.URL, config *rest.Config, stopChannel, readyChannel chan struct{}) error {
 	transport, upgrader, err := spdy.RoundTripperFor(config)
 	if err != nil {
 		return err
@@ -188,7 +184,7 @@ func (ng *ngCreateOptions) ForwardPorts(method string, url *url.URL, config *res
 	ports := []string{fmt.Sprintf("%d:%d", util.DefaultPort, util.DefaultPort)}
 
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, method, url)
-	fw, err := portforward.New(dialer, ports, StopChannel, ReadyChannel, ng.Out, ng.ErrOut)
+	fw, err := portforward.New(dialer, ports, stopChannel, readyChannel, ng.Out, ng.ErrOut)
 	if err != nil {
 		return err
 	}
@@ -196,6 +192,7 @@ func (ng *ngCreateOptions) ForwardPorts(method string, url *url.URL, config *res
 	return fw.ForwardPorts()
 }
 
+// nolint:gocritic
 func waitForPodRunning(client *kubernetes.Clientset, pod *corev1.Pod, namespace, selector string,
 	waitInterval, timeout time.Duration) error {
 
@@ -205,7 +202,7 @@ func waitForPodRunning(client *kubernetes.Clientset, pod *corev1.Pod, namespace,
 			if err != nil {
 				return false, err
 			}
-			for i, _ := range podList.Items {
+			for i := range podList.Items {
 				if podList.Items[i].Status.Phase == corev1.PodRunning {
 					*pod = podList.Items[i]
 					klog.Info(fmt.Sprintf("pod %s is running", pod.Name))
