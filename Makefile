@@ -1,7 +1,8 @@
 
 .PHONY: build
-build: fmt
+build: clean fmt
 	go build -o bin/ngctl main.go
+	cp bin/ngctl /usr/local/bin/ngctl
 
 .PHONY: clean
 clean:

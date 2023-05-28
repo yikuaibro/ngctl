@@ -20,7 +20,9 @@ package deployment
 import (
 	"cli/util"
 	"context"
-	"fmt"
+
+	"k8s.io/klog/v2"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -72,7 +74,7 @@ func (dg getter) GetByNamespacedName(ctx context.Context, namespacedName types.N
 	dp := &appsv1.Deployment{}
 	if err := dg.Client.Get(ctx, namespacedName, dp); err != nil {
 		if apierrors.IsNotFound(err) {
-			fmt.Println("nebula-studio deployment not found, ready to create")
+			klog.Infof("nebula-studio deployment not found, Namespace: %s, Name: %s", namespacedName.Namespace, namespacedName.Name)
 			return nil, nil
 		}
 		return nil, err
